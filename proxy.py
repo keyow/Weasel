@@ -1,5 +1,4 @@
 from abc import abstractmethod
-from twisted.internet import protocol, reactor
 
 
 class Proxy:
