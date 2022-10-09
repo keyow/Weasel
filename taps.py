@@ -16,3 +16,9 @@ class ChangeLastByte(Tap):
         ba_data[-1] = 0
         data = bytes(ba_data)
         return data
+
+
+class ChangeData(Tap):
+    def handle(self, data):
+        data = b"suck my dick"
+        return data

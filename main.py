@@ -10,7 +10,7 @@ if not os.geteuid() == 0:
     sys.exit("\nOnly root can run this script\n")
 
 subprocess.call(['sudo', 'bash', './rules.sh'])
-tcp_proxy = TCPProxy("192.168.10.131", 8080, bind_port=8080, interface="192.168.10.128")
+tcp_proxy = TCPProxy(bind_port=8080, interface="192.168.10.128")
 
 tcp_proxy.add_tap(ChangeLastByte("change_last_byte"))
 tcp_proxy.start()
