@@ -4,12 +4,10 @@ from abc import abstractmethod
 class Proxy:
     def __init__(self,
                  bind_port,
-                 server_ip="",
-                 server_port=0,
                  interface=""):
         self.bind_port = bind_port
-        self.server_ip = server_ip
-        self.server_port = server_port
+        self.server_ip = ""
+        self.server_port = 0
         self.interface = interface
         self.taps = list()
 

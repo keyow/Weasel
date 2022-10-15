@@ -1,8 +1,20 @@
 from twisted.internet.protocol import Protocol, ClientFactory, ServerFactory
-from twisted.internet import reactor
+from twisted.internet import reactor, ssl
 from proxy import Proxy
 import socket
 import struct
+import logging
+import subprocess
+
+logging.basicConfig(
+    format="%(asctime)s %(levelname)s : %(message)s",
+    filename="logs/session.log",
+    filemode='w',
+    level=logging.DEBUG)
+
+console = logging.StreamHandler()
+console.setLevel(logging.DEBUG)
+logging.getLogger().addHandler(console)
 
 
 class TCP(Protocol):
@@ -14,10 +26,15 @@ class TCP(Protocol):
 
 
 class TCPProxy(Proxy):
+    def __init__(self, bind_port, interface):
+        super().__init__(bind_port, interface)
+        subprocess.call(['sudo', 'bash', './scripts/rules.sh'])
+
     def start(self):
-        print("[DEBUG] tcp_proxy: ON")
-        print(f"\tinterface: {self.interface}")
-        print(f"\tbind_port: {self.bind_port}")
+        logging.info("tcp_proxy: ON")
+        logging.debug(f"interface: {(lambda arg: arg if arg is not None else 'None')(self.interface)}")
+        logging.debug(f"bind_port: {self.bind_port}")
+
         # ready to redirect packets to server_ip on server_port -> using factory below to produce protocol
         factory = TCPServerFactory(self.server_ip, self.server_port, protocol=TCPServerBridgeProto, proxy=self)
 
@@ -32,7 +49,11 @@ class TCPProxy(Proxy):
             for tap in protocol.factory.proxy.taps:
                 data = tap.handle(data)
             dataReceived(protocol, data)
+
         return wrapper
+
+    def __del__(self):
+        subprocess.call(['sudo', 'bash', './scripts/reset.sh'])
 
 
 class TCPServerBridgeProto(TCP):
@@ -47,22 +68,21 @@ class TCPServerBridgeProto(TCP):
             origin_dst = self.__destinationInfo()
             self.factory.server_ip = origin_dst[0]
             self.factory.server_port = origin_dst[1]
-
-        print(f"Client connection successful\n"
-              f"-----------------------------------\n"
-              f"Client:\n |\tIP address: {self.ip_tuple[0][0]}\n |\tPort: {self.ip_tuple[0][1]}\n"
-              f" |\n |\n v\n"
-              f"Proxy (current):\n |\tIP address: {self.ip_tuple[1][0]}\n |\tPort: {self.ip_tuple[1][1]}\n"
-              f" |\n |\n v\n"
-              f"Server (original):\n \tIP address: {self.factory.server_ip}\n \tPort: {self.factory.server_port}\n"
-              f"-----------------------------------\n")
+        logging.warning("Client connection successful!")
+        logging.debug(f"\n-----------------------------------\n"
+                      f"Client:\n |\tIP address: {self.ip_tuple[0][0]}\n |\tPort: {self.ip_tuple[0][1]}\n"
+                      f" |\n |\n v\n"
+                      f"Proxy (current):\n |\tIP address: {self.ip_tuple[1][0]}\n |\tPort: {self.ip_tuple[1][1]}\n"
+                      f" |\n |\n v\n"
+                      f"Server (original):\n \tIP address: {self.factory.server_ip}\n \tPort: {self.factory.server_port}\n"
+                      f"-----------------------------------")
 
         self.connectToTargetServer()
 
     # must be intercepted and modified!
     @TCPProxy.modify
     def dataReceived(self, data):
-        print(f"<<< [CLIENT_DEBUG]: {data}")
+        logging.info(f"Client > {data}")
 
         if self.client is not None:
             self.client.write(data)
@@ -94,21 +114,22 @@ class TCPClientBridgeProto(TCP):
         self.ip_tuple = None
 
     def connectionMade(self):
-        print(">>> Target server connection successful.")
+        logging.warning("Target server connection successful.")
         self.ip_tuple = Proxy.socket_tuple(self.transport.socket)
         self.write(self.factory.server.buffer)
         self.factory.server.client = self
 
     def dataReceived(self, data):
-        print(f"<<< [SERVER_DEBUG]: {data}")
+        logging.info(f"Server < {data}")
 
     def connectionLost(self, reason):
-        print(f"<<< [{self.__class__.__name__}] Lose connection...")
+        logging.error(f"[{self.__class__.__name__}] Lose connection...")
         self.factory.server.client = None
 
 
 class TCPServerFactory(ServerFactory):
     """Custom proxy has to be specified"""
+
     def __init__(self, server_ip, server_port, protocol, proxy):
         self.server_ip = server_ip
         self.server_port = server_port
