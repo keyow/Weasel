@@ -1,10 +1,11 @@
 from twisted.internet.protocol import Protocol, ClientFactory, ServerFactory
-from twisted.internet import reactor, ssl
+from twisted.internet import reactor
 from proxy import Proxy
 import socket
 import struct
 import logging
 import subprocess
+from asn1crypto import x509
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s : %(message)s",
@@ -15,6 +16,45 @@ logging.basicConfig(
 console = logging.StreamHandler()
 console.setLevel(logging.DEBUG)
 logging.getLogger().addHandler(console)
+
+
+class TLS_RecordLayer:
+    def __init__(self):
+        self.content_type = None
+        self.version = None
+        self.length = None
+        self.payload = dict()
+
+    def getHeader(self):
+        return self.content_type, self.version, self.length
+
+
+class TLS_ServerHelloPacket:
+    def __init__(self, packet_bytes=None):
+        self.server_hello = TLS_RecordLayer()  # empty (no need to use)
+        self.certificate = TLS_RecordLayer()
+        self.server_key_exchange = TLS_RecordLayer()  # empty (no need to use)
+        self.server_hello_done = TLS_RecordLayer()  # empty (no need to use)
+        self.raw = packet_bytes
+
+        if packet_bytes is not None:
+            self.__splitRecord(self.raw)
+
+    def load(self, raw):
+        self.raw = raw
+        self.__splitRecord(raw)
+
+    def __splitRecord(self, raw):
+        offset = 5 + int.from_bytes(raw[3:5], 'big')
+        self.certificate.content_type = raw[offset]
+        self.certificate.version = raw[1 + offset:3 + offset]
+        self.certificate.length = int.from_bytes(raw[3 + offset:5 + offset], 'big')
+        self.certificate.payload['Handshake Type'] = raw[5 + offset]
+        self.certificate.payload['Length'] = int.from_bytes(raw[6 + offset:9 + offset], 'big')
+        self.certificate.payload['Certificates Length'] = int.from_bytes(raw[9 + offset:12 + offset], 'big')
+        self.certificate.payload['Server Certificate Length'] = int.from_bytes(raw[12 + offset:15 + offset], 'big')
+        self.certificate.payload['Server Certificate'] = raw[15 + offset:15 + offset + self.certificate.payload[
+            'Server Certificate Length']]  # parsing just one certificate there
 
 
 class TCP(Protocol):
@@ -53,7 +93,7 @@ class TCPProxy(Proxy):
         return wrapper
 
     def __del__(self):
-        subprocess.call(['sudo', 'bash', './scripts/reset.sh'])
+        subprocess.call(['sudo', 'bash', './scripts/reset.sh'])  # ???
 
 
 class TCPServerBridgeProto(TCP):
@@ -120,7 +160,10 @@ class TCPClientBridgeProto(TCP):
         self.factory.server.client = self
 
     def dataReceived(self, data):
-        logging.info(f"Server < {data}")
+        #  TODO: expand TLS class for different records, check if that record is server hello (make nested TLS records)
+        packet = TLS_ServerHelloPacket(data)  # test for server hello
+        cert = x509.Certificate.load(packet.certificate.payload['Server Certificate'])
+        logging.critical(f"< Server Certificate: {cert.native}")
 
     def connectionLost(self, reason):
         logging.error(f"[{self.__class__.__name__}] Lose connection...")

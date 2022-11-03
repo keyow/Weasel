@@ -2,7 +2,6 @@
 
 from TCP import *
 from taps import *
-import subprocess
 import sys
 import os
 
