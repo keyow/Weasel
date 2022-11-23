@@ -18,7 +18,9 @@ class ChangeLastByte(Tap):
         return data
 
 
-class ChangeData(Tap):
-    def handle(self, data):
-        data = b"suck my dick"
-        return data
+class ChangeCertificateDate(Tap):
+    def handle(self, certificate):
+        print("Handler: ")
+        print(certificate.native)
+        print(f"DUMP\n{certificate.dump()}")
+        return certificate.dump()

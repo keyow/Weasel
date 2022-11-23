@@ -19,5 +19,5 @@ class Proxy:
         return socket.getpeername(), socket.getsockname()
 
     @abstractmethod
-    def start(self):
+    def start(self, saveCertificate):
         pass

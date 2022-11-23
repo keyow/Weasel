@@ -1,12 +1,12 @@
-2022-11-04 01:15:02,797 INFO : tcp_proxy: ON
-2022-11-04 01:15:02,797 DEBUG : interface: 192.168.10.128
-2022-11-04 01:15:02,797 DEBUG : bind_port: 8080
-2022-11-04 01:15:04,200 WARNING : Client connection successful!
-2022-11-04 01:15:04,200 DEBUG : 
+2022-11-24 00:29:44,684 INFO : tcp_proxy: ON
+2022-11-24 00:29:44,684 DEBUG : interface: 192.168.10.128
+2022-11-24 00:29:44,684 DEBUG : bind_port: 8080
+2022-11-24 00:29:46,942 INFO : Client connection successful!
+2022-11-24 00:29:46,942 DEBUG : 
 -----------------------------------
 Client:
  |	IP address: 192.168.10.129
- |	Port: 50358
+ |	Port: 59330
  |
  |
  v
@@ -20,9 +20,7 @@ Server (original):
  	IP address: 192.168.10.131
  	Port: 44330
 -----------------------------------
-2022-11-04 01:15:04,200 INFO : Client > b"\x16\x03\x01\x01 \x01\x00\x01\x1c\x03\x03\x93\xdb\x90\xb8\xe5%;\x8cUH\x87\xe3\x98O\xb0\x00A\xf2\xba\x1e\xe0=\x91\xf3\xba\xa5\x93\xb3\xf4u[\x91 \x97\x07\xe1\xfd|_\xbd\xec\x9a\x10_\x93\xd1O\xf2\xe8\xe1T\xfa\xe0\xd6\xbbn\xcb\x0eR\xb7_\xe9\x8a\xe9T\x00>\x13\x02\x13\x03\x13\x01\xc0,\xc00\x00\x9f\xcc\xa9\xcc\xa8\xcc\xaa\xc0+\xc0/\x00\x9e\xc0$\xc0(\x00k\xc0#\xc0'\x00g\xc0\n\xc0\x14\x009\xc0\t\xc0\x13\x003\x00\x9d\x00\x9c\x00=\x00<\x005\x00/\x00\xff\x01\x00\x00\x95\x00\x0b\x00\x04\x03\x00\x01\x02\x00\n\x00\x16\x00\x14\x00\x1d\x00\x17\x00\x1e\x00\x19\x00\x18\x01\x00\x01\x01\x01\x02\x01\x03\x01\x04\x00#\x00\x00\x00\x16\x00\x00\x00\x17\x00\x00\x00\r\x00*\x00(\x04\x03\x05\x03\x06\x03\x08\x07\x08\x08\x08\t\x08\n\x08\x0b\x08\x04\x08\x05\x08\x06\x04\x01\x05\x01\x06\x01\x03\x03\x03\x01\x03\x02\x04\x02\x05\x02\x06\x02\x00+\x00\x05\x04\x03\x04\x03\x03\x00-\x00\x02\x01\x01\x003\x00&\x00$\x00\x1d\x00 \xb1\x8dv&\xd0\xfb\x8d\xa7\x93\x01!vzk\xdc\xa1\x13\xfe@\xd6\x83\x95\x88#\x85D\x13\xce\xfc\xc6@\x00"
-2022-11-04 01:15:04,201 WARNING : Target server connection successful.
-2022-11-04 01:15:04,202 WARNING : Target server connection successful.
-2022-11-04 01:15:04,204 CRITICAL : < Server Certificate: OrderedDict([('tbs_certificate', OrderedDict([('version', 'v3'), ('serial_number', 198927856863484862077250672088790514715345244395), ('signature', OrderedDict([('algorithm', 'sha256_rsa'), ('parameters', None)])), ('issuer', OrderedDict([('country_name', 'RU'), ('state_or_province_name', 'Some-State'), ('organization_name', 'Internet Widgits Pty Ltd')])), ('validity', OrderedDict([('not_before', datetime.datetime(2022, 10, 10, 11, 21, 21, tzinfo=datetime.timezone.utc)), ('not_after', datetime.datetime(2023, 10, 10, 11, 21, 21, tzinfo=datetime.timezone.utc))])), ('subject', OrderedDict([('country_name', 'RU'), ('state_or_province_name', 'Some-State'), ('organization_name', 'Internet Widgits Pty Ltd')])), ('subject_public_key_info', OrderedDict([('algorithm', OrderedDict([('algorithm', 'rsa'), ('parameters', None)])), ('public_key', OrderedDict([('modulus', 25942427594101562025531747948774230680300634572830150944946762286538513358639965881355723846684891913837748788212286154918074422286321749267391301140548435036370006596090514249299365119367982865668246818622615258655306361121826352895357470176060567874983867822661034205162337999153579063140649306943421919986893203879759639447448200844938144574786660708151972766331288028370859638558992648580973522365596279867250250941857367776537297977101625593998122114722896329954925021581586231525243970844082697922736902766278998400133931991250725396547183002665330811193363779256906787572181920135842287483685550319058486507059), ('public_exponent', 65537)]))])), ('issuer_unique_id', None), ('subject_unique_id', None), ('extensions', [OrderedDict([('extn_id', 'key_identifier'), ('critical', False), ('extn_value', b'\x146\x12d\xd9u\x0c\xe0\x94G\xbc\xb7\x88\x92G\xab#\xb9Ya')]), OrderedDict([('extn_id', 'authority_key_identifier'), ('critical', False), ('extn_value', OrderedDict([('key_identifier', b'\x146\x12d\xd9u\x0c\xe0\x94G\xbc\xb7\x88\x92G\xab#\xb9Ya'), ('authority_cert_issuer', None), ('authority_cert_serial_number', None)]))]), OrderedDict([('extn_id', 'basic_constraints'), ('critical', True), ('extn_value', OrderedDict([('ca', True), ('path_len_constraint', None)]))])])])), ('signature_algorithm', OrderedDict([('algorithm', 'sha256_rsa'), ('parameters', None)])), ('signature_value', b">S\x1a\xa9w\x0c\xbe6\xb9\x1f(G%\x98\x08F\xb5\xc5\xd9h\x05\x92:\n\x83\xb2=\xaa\xec\xdf2x\n\x87\xb0#B\x84\xc5\xab\xfb\xbd\xd0fN\x8806;\xdb\xfa\xc6\x9eu\xff\x06\xf6\xc7PI\xdd\x9c#`/\x18\x0f\xa9\x00\x10\xacv\x8f_\xf19`\xc2\xd2\xb1X\x1e\x88e\x9e\xe9\x86*>AlF\xcf\xa3B\x84\xa5\xfa\xb6\x19\x05/\xf6\xa2\xd3v\x0c6\xd1\x8dW\x81s\x9d\xa3|\x8e\xf3\x94h\xec\x85\xa7o[\x08\xfc\xbb\\\xae\xeb[Z\xff\x8e\xe1\xff\xc1OD\xf9\xc36\xd0\x1a\xc4\xa2/\x1c\xab\xf7B'H\xdd\x9f\x8c}A\x83\xcd\x10i\xc7M\x81W\xfc\xfc&\x97\x1c>\xe6\x18\x06!\x1e\xfd\xa1\xac\xf3v*`k\xd8T\xcf\x12R\xac\xdd]\t\xe2\xb7\xbf\xdd\x1dAE\x05\xaf\xd5\xb7c\xf0F\xd8e\xf5\x7f\xe6;gD\xe92*h\x185*\x84\x94\x9e\x1a3\x91C0/e\x8a\xad\x93\xf3'\xb8<\xe63V\x86RS\xdc\xbd[F9\xf0\xb3\xaf\xb4")])
-2022-11-04 01:20:21,870 ERROR : [TCPClientBridgeProto] Lose connection...
-2022-11-04 01:20:21,871 ERROR : [TCPClientBridgeProto] Lose connection...
+2022-11-24 00:29:46,943 INFO : Server connection successful!
+2022-11-24 00:29:46,945 CRITICAL : Got client certificate:
+2022-11-24 00:29:46,955 CRITICAL : Got client certificate:
+2022-11-24 01:02:29,925 ERROR : [TCPClientBridgeProto] Lose connection...
