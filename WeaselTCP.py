@@ -1,3 +1,5 @@
+import sys
+
 from twisted.internet.protocol import Protocol, ClientFactory, ServerFactory
 from twisted.internet import reactor
 from proxy import Proxy
@@ -7,10 +9,7 @@ import logging
 import subprocess
 from abc import abstractmethod
 from asn1crypto import x509
-from pprint import pprint
-import json
-from OpenSSL import crypto
-from random import random
+from errors import TLS_errors
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s : %(message)s",
@@ -49,14 +48,22 @@ class TLS_Packet:
         pass
 
     @abstractmethod
+    def substituteCertificate(self, new_certificate_chain):
+        pass
+
+    @abstractmethod
     def __splitRecord(self, raw):
         pass
 
     @staticmethod
-    def containsCertificate(raw, src):
+    def containsCertificate(raw):
         # Server Hello packet always contains certificate
-        # Checking equality of fifth byte and 0x02 (server hello) or 0x1b (which is client certificate by itself)
-        return raw[5] == int('02', 16) or raw[5] == int('0b', 16)
+        # Checking equality of fifth byte and 0x02 (server hello) or 0x0b (which is client certificate by itself)
+        return raw[0] == int('16', 16) and (raw[5] == int('02', 16) or raw[5] == int('0b', 16))
+
+    @staticmethod
+    def containsError(raw):
+        return raw[0] == int('15', 16)
 
     def _parseCertificates(self, offset):
         if self.raw is None:
@@ -69,18 +76,16 @@ class TLS_Packet:
         certificateLayer.payload['Handshake Type'] = self.raw[5 + offset]
         certificateLayer.payload['Handshake Length'] = int.from_bytes(self.raw[6 + offset:9 + offset], 'big')
         certificateLayer.payload['Certificates Length'] = int.from_bytes(self.raw[9 + offset:12 + offset], 'big')
-        certificateLayer.payload['Certificates'] = dict()
+        certificateLayer.payload['Certificates'] = list()
 
         tmp_length = 0
-        certificateIndex = 0
         while tmp_length != certificateLayer.payload['Certificates Length']:
             certificate_length = int.from_bytes(self.raw[12 + offset + tmp_length:15 + offset + tmp_length], 'big')
-            certificateLayer.payload['Certificates'][certificateIndex] = [certificate_length,
-                                                                          self.raw[15 + offset + tmp_length:
-                                                                                   15 + offset + tmp_length +
-                                                                                   certificate_length]]
+            certificateLayer.payload['Certificates'].append([certificate_length,
+                                                             self.raw[15 + offset + tmp_length:
+                                                                      15 + offset + tmp_length +
+                                                                      certificate_length]])
             tmp_length += (3 + certificate_length)
-            certificateIndex += 1
 
         return certificateLayer
 
@@ -116,12 +121,30 @@ class TLS_ServerHelloPacket(TLS_Packet):
         raw += self.certificate.payload["Handshake Type"].to_bytes(1, 'big')
         raw += self.certificate.payload["Handshake Length"].to_bytes(3, 'big')
         raw += self.certificate.payload["Certificates Length"].to_bytes(3, 'big')
-        for pair in self.certificate.payload["Certificates"].values():
+        for pair in self.certificate.payload["Certificates"]:
             raw += pair[0].to_bytes(3, 'big') + pair[1]
 
         raw += self.raw[self.certificate.end_index:]
 
         return raw
+
+    def substituteCertificate(self, new_certificate_chain):
+        len_prev = 0
+        for pair in self.certificate.payload['Certificates']:
+            len_prev += 3
+            len_prev += len(pair[1])
+
+        len_cur = 0
+        for pair in new_certificate_chain:
+            len_cur += 3 + len(pair[1])
+
+        print(f"CURRENT LENGTH: {len_cur}")
+        len_adjust = len_cur - len_prev
+
+        self.certificate.payload['Handshake Length'] += len_adjust
+        self.certificate.payload['Certificates Length'] += len_adjust
+        self.certificate.length += len_adjust
+        self.certificate.payload['Certificates'] = new_certificate_chain
 
 
 class TLS_ClientCertificatePacket(TLS_Packet):
@@ -153,12 +176,29 @@ class TLS_ClientCertificatePacket(TLS_Packet):
         raw += self.certificate.payload["Handshake Type"].to_bytes(1, 'big')
         raw += self.certificate.payload["Handshake Length"].to_bytes(3, 'big')
         raw += self.certificate.payload["Certificates Length"].to_bytes(3, 'big')
-        for pair in self.certificate.payload["Certificates"].values():
+        for pair in self.certificate.payload["Certificates"]:
             raw += pair[0].to_bytes(3, 'big') + pair[1]
 
         raw += self.raw[self.certificate.end_index:]
 
         return raw
+
+    def substituteCertificate(self, new_certificate_chain):
+        len_prev = 0
+        for pair in self.certificate.payload['Certificates']:
+            len_prev += 3
+            len_prev += len(pair[1])
+
+        len_cur = 0
+        for pair in new_certificate_chain:
+            len_cur += 3 + len(pair[1])
+
+        len_adjust = len_cur - len_prev
+
+        self.certificate.payload['Handshake Length'] += len_adjust
+        self.certificate.payload['Certificates Length'] += len_adjust
+        self.certificate.length += len_adjust
+        self.certificate.payload['Certificates'] = new_certificate_chain
 
 
 class TCP(Protocol):
@@ -170,15 +210,13 @@ class TCP(Protocol):
             self.transport.write(data)
 
 
-class TCPProxy(Proxy):
-    saveCertificates = None
-
+class WeaselProxy(Proxy):
     def __init__(self, bind_port, interface):
         super().__init__(bind_port, interface)
+        self.fakeCertificatesChain = None
         subprocess.call(['sudo', 'bash', './scripts/rules.sh'])
 
-    def start(self, saveCertificates):
-        TCPProxy.saveCertificates = saveCertificates
+    def start(self, fakeCertificateChain):
         logging.info("tcp_proxy: ON")
         logging.debug(f"interface: {(lambda arg: arg if arg is not None else 'None')(self.interface)}")
         logging.debug(f"bind_port: {self.bind_port}")
@@ -189,6 +227,7 @@ class TCPProxy(Proxy):
         # listening traffic on bind port
         listener = reactor.listenTCP(self.bind_port, factory, interface=self.interface)
 
+        self.fakeCertificatesChain = fakeCertificateChain
         reactor.run()
 
     @staticmethod
@@ -212,7 +251,6 @@ class TCPServerBridgeProto(TCP):
             self.factory.server_ip = origin_dst[0]
             self.factory.server_port = origin_dst[1]
         logging.info("Client connection successful!")
-        print(TCPProxy.saveCertificates)
         logging.debug(f"\n-----------------------------------\n"
                       f"Client:\n |\tIP address: {self.ip_tuple[0][0]}\n |\tPort: {self.ip_tuple[0][1]}\n"
                       f" |\n |\n v\n"
@@ -230,82 +268,19 @@ class TCPServerBridgeProto(TCP):
         self.connectToTargetServer()
 
     # must be intercepted and modified!
-    @TCPProxy.modify
+    @WeaselProxy.modify
     def dataReceived(self, data):
-        if TLS_Packet.containsCertificate(data, src='client'):
-            logging.critical(f"Got client certificate:")
-            print("CLIENT DATA")
-            print(data)
+        if TLS_Packet.containsCertificate(data):
+            logging.critical(f"Got client certificate")
             packet = TLS_ClientCertificatePacket(data)  # test for server hello
-            certificates_count = len(packet.certificate.payload['Certificates'])
-            head_cert = x509.Certificate.load(
-                packet.certificate.payload['Certificates'][1 if certificates_count >= 1 else 0][1])
-
-            # Creating CA certificate
-            serialnumber = random.getrandbits(64)
-            k = crypto.PKey()
-            k.generate_key(crypto.TYPE_RSA, 2048)
-            ca_cert = crypto.X509()
-            ca_cert.get_subject().C = "RU"
-            ca_cert.get_subject().ST = "Moscow District"
-            ca_cert.get_subject().L = "Moscow"
-            ca_cert.get_subject().O = "IU8 was here"
-            ca_cert.get_subject().CN = "Kirill was in this CA"
-            ca_cert.get_subject().emailAddress = "CA@gmail.com"
-            ca_cert.set_serial_number(serialnumber)
-            ca_cert.gmtime_adj_notBefore(0)
-            ca_cert.gmtime_adj_notAfter(315360000)
-            ca_cert.set_issuer(ca_cert.get_subject())
-            ca_cert.set_pubkey(k)
-            ca_cert.sign(k, 'sha512')
-            ca_certificate = crypto.dump_certificate(crypto.FILETYPE_PEM, ca_cert)
-            ca_key = crypto.dump_privatekey(crypto.FILETYPE_PEM, k)
-
-            key = crypto.PKey()
-            key.generate_key(crypto.TYPE_RSA, 2048)
-            req = crypto.X509Req()
-            req.get_subject().C = "RU"
-            req.get_subject().ST = "Moscow District"
-            req.get_subject().L = "Moscow"
-            req.get_subject().O = "IU8 was here"
-            req.get_subject().CN = "Kirill was here"
-            req.get_subject().emailAddress = "fsdjgjspfpjs@gmail.com"
-            req.set_pubkey(key)
-            req.sign(key, 'sha512')
-            csr = crypto.dump_certificate_request(crypto.FILETYPE_PEM, req)
-
-            serialnumber = random.getrandbits(64)
-            new_cert = crypto.X509()
-            new_cert.set_serial_number(serialnumber)
-            new_cert.gmtime_adj_notAfter(0)
-            new_cert.gmtime_adj_notAfter(31536000)
-            new_cert.set_subject(req.get_subject())
-            new_cert.set_issuer(ca_cert.get_subject())
-            new_cert.set_pubkey(key)
-            
-
-            print("\nCSR FOR NEW CERTIFICATE:")
-            print(csr.decode(encoding='utf-8'))
-
-            print("CLIENT CERT NATIVE")
-            pprint(head_cert.native)
-            # do something with cert here
-
-            serialnumber = random.getrandbits(64)
-            ca_cert = crypto.load_certificate(crypto.FILETYPE_PEM, packet.certificate.payload['Certificates'][
-                1 if certificates_count >= 1 else 0][1])
-
-            packet.certificate.payload['Certificates'][0][1] = head_cert.dump()
-            print("CLIENT DUMP:")
-            print(packet.dump())
-            if TCPProxy.saveCertificates:
-                with open("misc/certinfo/client_cert.txt", 'w') as f:
-                    json.dump(head_cert.native, f, default=str)
+            packet.substituteCertificate(self.factory.proxy.fakeCertificatesChain.getList())
+            data = packet.dump()
 
         if self.target_bridge is not None:
             self.__transferToClientBridge(data)
 
         self.buffer += data
+
         # second option: initial client is none, so we connect to server after we receive data > client is not none
         # self.connectToTargetServer()
         self.DataExchangeIndex += 1
@@ -350,44 +325,17 @@ class TCPClientBridgeProto(TCP):
         self.factory.server.target_bridge = self
 
     def dataReceived(self, data):
-        if TLS_Packet.containsCertificate(data, src='server'):
-            logging.critical(f"Got client certificate:")
-            print("SERVER INITIAL DATA")
-            print(data)
+        if TLS_Packet.containsCertificate(data):
+            logging.critical(f"Got server certificate")
+
             packet = TLS_ServerHelloPacket(data)  # test for server hello
             cert = x509.Certificate.load(packet.certificate.payload['Certificates'][0][1])
 
-            native_cert = cert.native
-            # new_not_before = datetime(2020, 11, 16, 0, 0, 0, tzinfo=timezone.utc)
-            print("CURRENT VALID_BEFORE DATETIME")
-
-            """
-            valid_before_idx = data.find(b'\x17\x0d') + 2
-            temp = bytearray(data)
-            temp[valid_before_idx + 1] -= 1
-            
-            print(temp)
-            for byte in temp[valid_before_idx:valid_before_idx + 13]:
-                print(chr(byte))
-
-            print(str(len(data)) + " --- " + str(len(bytes(temp))))
-            data = bytes(temp)
-            
-            ba_data = bytearray(data)
-            ba_data[valid_before_idx + 1] = 48
-            data = bytes(ba_data)
-            print(data[valid_before_idx:valid_before_idx + 13])
-            """
-            print("SERVER NATIVE CERT:")
-            pprint(native_cert)
-
             # do something with cert here
             packet.certificate.payload['Certificates'][0][1] = cert.dump()
-            print("SERVER DUMP:")
-            print(packet.dump())
-            if TCPProxy.saveCertificates:
-                with open("misc/certinfo/server_cert.txt", 'w') as f:
-                    json.dump(cert.native, f, default=str)
+        elif TLS_Packet.containsError(data):
+            logging.warning("Got error from server. Take a look!")
+            logging.warning(f"Error text: {TLS_errors[data[6]]}")
 
         # TODO: expand TLS class for different records, check if that record is server hello (make nested TLS records)
         # target server response (transfer from proxy to client)
