@@ -206,20 +206,45 @@ class TLS_ClientCertificatePacket(TLS_CertificatePacket):
 
 class TCP(Protocol):
     SO_ORIGINAL_DST = 80  # for TCP original dst and port
-    DataExchangeIndex = 0
 
     def write(self, data):
+        """
+        Writes data to target
+
+        :param data:
+        """
         if data:
             self.transport.write(data)
 
 
 class WeaselProxy(Proxy):
+    """
+    WeaselProxy - proxy that allows user to test client-server connection on sending fake certificates.
+    Proxy captures client packets that are addressed to server, substitute certificate and then sends to server.
+    If server's response is pointing on a mistake made in a certificate - that's good! Server's TLS verification's
+    settings are set correctly.
+    Otherwise, server has potential vulnerability that can be used in a real MITM attack.
+    See more details below!
+
+    WeaselProxy also call's script ./scripts/rules.sh to establish routing rules: all tcp packets are rerouted
+    to port 8080
+
+    Attributes:
+        fakeCertificatesChain (CertificateChain) - certificate chain that contains fake certificates (also it
+                                                   can contain good certificates - that's also possible
+    """
+
     def __init__(self, bind_port, interface):
         super().__init__(bind_port, interface)
         self.fakeCertificatesChain = None
         subprocess.call(['sudo', 'bash', './scripts/rules.sh'])
 
     def start(self, fakeCertificateChain):
+        """
+        Starts WeaselProxy (listening for client)
+
+        :param fakeCertificateChain: fake certificate chain
+        """
         logging.info("tcp_proxy: ON")
         logging.debug(f"interface: {(lambda arg: arg if arg is not None else 'None')(self.interface)}")
         logging.debug(f"bind_port: {self.bind_port}")
@@ -233,15 +258,19 @@ class WeaselProxy(Proxy):
         self.fakeCertificatesChain = fakeCertificateChain
         reactor.run()
 
-    @staticmethod
-    def modify(dataReceived):
-        def wrapper(protocol, data):
-            return dataReceived(protocol, data)
-
-        return wrapper
-
 
 class TCPServerBridgeProto(TCP):
+    """
+    TCPServerBridgeProto - bridge between client and server. At this time proxy is acting like a server.
+    It processes packets that were accepted from client.
+    Then TCPServerBridgeProto sends then straight to the target server acting as a client.
+
+    Attributes:
+        target_bridge (TCP): target bridge that we want to be used to send intercepted packets to server
+        buffer (bytes): buffer that contains client data.
+                        We use buffer to keep client data until we know about something about the server
+    """
+
     def __init__(self):
         self.target_bridge = None
         self.ip_tuple = None
@@ -260,18 +289,11 @@ class TCPServerBridgeProto(TCP):
                       f"Proxy (current):\n |\tIP address: {self.ip_tuple[1][0]}\n |\tPort: {self.ip_tuple[1][1]}\n"
                       f" |\n |\n v\n"
                       f"Server (original):\n \tIP address: {self.factory.server_ip}\n \tPort: {self.factory.server_port}\n"
-                      f"-----------------------------------")
+                      f"-----------------------------------\n")
 
-        '''
-        first option is to connect to server when client is connected to proxy (immediately)
-        after we connect to server, we get self.client initialized
-        current machine acts as a CLIENT for target server
-        that's why we use self.client.write(data) (we send data to server)
-        '''
+        # Trying to connect to the target server
         self.connectToTargetServer()
 
-    # must be intercepted and modified!
-    @WeaselProxy.modify
     def dataReceived(self, data):
         if TLS_CertificatePacket.containsCertificate(data):
             logging.critical(f"Got client certificate")
@@ -284,11 +306,12 @@ class TCPServerBridgeProto(TCP):
 
         self.buffer += data
 
-        # second option: initial client is none, so we connect to server after we receive data > client is not none
-        # self.connectToTargetServer()
-        self.DataExchangeIndex += 1
-
     def connectToTargetServer(self):
+        """
+        Trying to connect to target server. Proxy will be acting as a client when connected.
+
+        :return: nothing
+        """
         factory = ClientFactory()
         factory.protocol = TCPClientBridgeProto
         factory.proxy = self.factory.proxy
@@ -297,6 +320,11 @@ class TCPServerBridgeProto(TCP):
         reactor.connectTCP(self.factory.server_ip, self.factory.server_port, factory)
 
     def __destinationInfo(self):
+        """
+        Getting original server IP. We need this because rerouting rules (made by iptables) hide original server ip.
+
+        :return original_dst_ip, original_dst_port: Tuple object.
+        """
         dst_info = self.transport.socket.getsockopt(socket.SOL_IP, self.SO_ORIGINAL_DST, 16)
         # ! - big-endian (H - unsigned short, B - unsigned char)
         (proto, port, b1, b2, b3, b4) = struct.unpack('!HHBBBB', dst_info[:8])
@@ -307,45 +335,60 @@ class TCPServerBridgeProto(TCP):
         return original_dst_ip, original_dst_port
 
     def __transferToClientBridge(self, data):
-        print("Writing to connected server")
+        """
+        In this case we know about the server, so se can transfer our data straight to the server without using buffer.
+
+        :param data: Bytes object. Raw data
+        :return: nothing
+        """
         self.target_bridge.write(data)
 
 
 class TCPClientBridgeProto(TCP):
-    def __init__(self):
-        self.ip_tuple = None
+    """
+    TCPClientBridgeProto - bridge in which WeaselProxy is acting like a client. We got intercepted data from client,
+    so what we gonna do now? We want to pass this modified pieces of data to server, so we establish new connection
+    and transfer data straight away. TCPClientBridgeProto also listens to server response to pass it back to client.
+    """
 
     def connectionMade(self):
         logging.info('Server connection successful!')
-        self.ip_tuple = Proxy.socket_tuple(self.transport.socket)
 
         # if buffer is not empty means that connection hasn't been terminated and every packet was sent at once
         if self.factory.server.buffer != b'':
-            print("CLIENT BUFFER IS NOT EMPTY -> WRITING TO SERVER")
             self.write(self.factory.server.buffer)
             self.factory.server.buffer = b''
 
+        '''
+        That's a really important step. We've just established server connection, so we
+        need save that bridge in TCPServerBridgeProto because we don't need to use buffer now. 
+        We will transfer our data STRAIGHT to that bridge, and then to the server.
+        '''
         self.factory.server.target_bridge = self
 
     def dataReceived(self, data):
         if TLS_CertificatePacket.containsCertificate(data):
             logging.critical(f"Got server certificate")
 
-            packet = TLS_ServerHelloPacket(data)  # test for server hello
+            # if server response contains certificate - it is exactly server hello packet
+            packet = TLS_ServerHelloPacket(data)
             cert = x509.Certificate.load(packet.certificate.payload['Certificates'][0][1])
 
-            # do something with cert here
             packet.certificate.payload['Certificates'][0][1] = cert.dump()
         elif TLS_CertificatePacket.containsError(data):
             logging.warning("Got error from server. Take a look!")
             logging.warning(f"Error text: {TLS_errors[data[6]]}")
 
-        # TODO: expand TLS class for different records, check if that record is server hello (make nested TLS records)
         # target server response (transfer from proxy to client)
         self.factory.server.transport.write(data)
-        self.DataExchangeIndex += 1
 
     def connectionLost(self, reason):
+        """
+        Processing connection termination
+
+        :param reason:
+        :return: nothing
+        """
         logging.error(f"[{self.__class__.__name__}] Lose connection...")
 
 

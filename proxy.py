@@ -11,9 +11,6 @@ class Proxy:
         self.interface = interface
         self.taps = list()
 
-    def add_tap(self, tap):
-        self.taps.append(tap)
-
     @staticmethod
     def socket_tuple(socket):
         return socket.getpeername(), socket.getsockname()
