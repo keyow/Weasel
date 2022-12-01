@@ -1,12 +1,10 @@
 #!/usr/bin/python3
 
-import sys
 import os
 import argparse
+from sys import exit
 from WeaselTCP import *
-from taps import *
 from certgen import *
-from asn1crypto import x509
 
 if __name__ == "__main__":
     if not os.geteuid() == 0:

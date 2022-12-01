@@ -1,5 +1,3 @@
-import sys
-
 from twisted.internet.protocol import Protocol, ClientFactory, ServerFactory
 from twisted.internet import reactor
 from proxy import Proxy
@@ -7,7 +5,6 @@ import socket
 import struct
 import logging
 import subprocess
-from abc import abstractmethod
 from asn1crypto import x509
 from errors import TLS_errors
 
@@ -23,6 +20,18 @@ logging.getLogger().addHandler(console)
 
 
 class TLS_RecordLayer:
+    """
+    Contains TLS record layer including header and payload
+
+    Attributes:
+        start_index (int): index where layer starts at
+        end_index (int): index where layer ends at
+        content_type (bytes): type of handshake
+        version (bytes): TLS version (ProxyWeasel supports TLS1_2)
+        length (int): length of TLS record layer
+        payload (dict): payload dictionary
+    """
+
     def __init__(self):
         self.start_index = 0
         self.end_index = 0
@@ -32,40 +41,135 @@ class TLS_RecordLayer:
         self.payload = dict()
 
     def getHeader(self):
+        """
+        Return TLS record layer header
+        Used for debugging
+
+        :return: content_type: Handshake type
+        :return: version: TLS version
+        :return: length: TLS record layer length
+        """
         return self.content_type, self.version, self.length
 
 
-class TLS_Packet:
-    def __init__(self, packet_bytes=None):
+class TLS_CertificatePacket:
+    """
+    TLS packet containing the certificate (no matter whether that certificate is client's or server's)
+    Used to easily substitute certificate in raw bytes
+    Only two types of certificate packets exist: server hello and client certificate response
+    Certificate is recalculated when new raw data is loaded
+    (certificate is IN PAIR with data - they are bounded to each other)
+
+    Attributes:
+        raw (bytes): raw bytes of TLS packet
+        certificate (TLS_RecordLayer): Certificate TLS record layer
+    """
+
+    def __init__(self, packet_bytes=None, offset=0):
         self.raw = packet_bytes
+        self.certificate = TLS_RecordLayer()
 
-    def load(self, raw):
-        self.raw = raw
-        self.__splitRecord(raw)
-
-    @abstractmethod
-    def dump(self):
-        pass
-
-    @abstractmethod
-    def substituteCertificate(self, new_certificate_chain):
-        pass
-
-    @abstractmethod
-    def __splitRecord(self, raw):
-        pass
+        if packet_bytes is not None:
+            # we can try to split record only when packet_bytes are not None (additional protection)
+            self.__splitRecord(offset=offset)
 
     @staticmethod
     def containsCertificate(raw):
-        # Server Hello packet always contains certificate
-        # Checking equality of fifth byte and 0x02 (server hello) or 0x0b (which is client certificate by itself)
+        """
+        Checks if raw data contains certificate by comparing specific bytes
+        Server Hello packet always contains certificate
+
+        :param raw: Raw bytes
+        :returns bool: Bool value
+        """
         return raw[0] == int('16', 16) and (raw[5] == int('02', 16) or raw[5] == int('0b', 16))
 
     @staticmethod
     def containsError(raw):
+        """
+        Checks if raw data contains error
+        (Commonly it is used to check if server's response contains error)
+
+        :param raw: Raw bytes
+        :returns bool: Bool value
+        """
         return raw[0] == int('15', 16)
 
+    def __splitCertificateRecord(self, offset):
+        """
+        Private method. Used to split raw entered data by certificate chain in it
+        The only thing we have to know is already calculated certificate chain offset
+
+        :param offset: Certificate offset
+        :returns: nothing
+        """
+        self.certificate = self._parseCertificates(offset)
+        self.certificate.start_index = offset
+        self.certificate.end_index = offset + 1 + 2 + 2 + self.certificate.length
+
+    def load(self, raw):
+        """
+        Allows to load raw data to class. Data will be automatically parsed by certificate
+
+        :param raw: Raw bytes
+        :returns: nothing
+        """
+        self.raw = raw
+        self.__splitCertificateRecord(raw)
+
+    def dump(self):
+        """
+        Creates a dump of the package containing the certificate. Simply returns raw bytes.
+        
+        :returns bytes: Raw data
+        """
+        return self.raw
+
+    def substituteCertificates(self, new_certificate_chain):
+        """
+        Replaces the certificate chain in the record with a new one,
+        while recalculating the lengths of each certificate record segment
+
+        :param new_certificate_chain: List object. New certificate chain.
+        :return raw: New raw data with a new certificate
+        """
+        len_prev = 0
+        for pair in self.certificate.payload['Certificates']:
+            len_prev += 3
+            len_prev += len(pair[1])
+
+        len_cur = 0
+        for pair in new_certificate_chain:
+            len_cur += 3 + len(pair[1])
+
+        len_adjust = len_cur - len_prev
+
+        self.certificate.payload['Handshake Length'] += len_adjust
+        self.certificate.payload['Certificates Length'] += len_adjust
+        self.certificate.length += len_adjust
+        self.certificate.payload['Certificates'] = new_certificate_chain
+
+        raw = b''
+        raw += self.raw[:self.certificate.start_index]
+        raw += self.certificate.content_type.to_bytes(1, 'big')
+        raw += self.certificate.version
+        raw += self.certificate.length.to_bytes(2, 'big')
+        raw += self.certificate.payload["Handshake Type"].to_bytes(1, 'big')
+        raw += self.certificate.payload["Handshake Length"].to_bytes(3, 'big')
+        raw += self.certificate.payload["Certificates Length"].to_bytes(3, 'big')
+        for pair in self.certificate.payload["Certificates"]:
+            raw += pair[0].to_bytes(3, 'big') + pair[1]
+        raw += self.raw[self.certificate.end_index:]
+
+        self.raw = raw
+
     def _parseCertificates(self, offset):
+        """
+        Parses entered raw data (it is a field in class which is already known) and gets certificate record from it
+
+        :param offset: Int object. Must be used to properly get certificate position.
+        :return CertificateLayer: TLS_RecordLayer object. Layer which contains certificate (as a payload)
+        """
         if self.raw is None:
             return
         certificateLayer = TLS_RecordLayer()
@@ -90,115 +194,14 @@ class TLS_Packet:
         return certificateLayer
 
 
-class TLS_ServerHelloPacket(TLS_Packet):
+class TLS_ServerHelloPacket(TLS_CertificatePacket):
     def __init__(self, packet_bytes=None):
-        super().__init__(packet_bytes)
-        self.server_hello = TLS_RecordLayer()  # empty (no need to use)
-        self.certificate = TLS_RecordLayer()
-        self.server_key_exchange = TLS_RecordLayer()  # empty (no need to use)
-        self.server_hello_done = TLS_RecordLayer()  # empty (no need to use)
-
-        if packet_bytes is not None:
-            self.__splitRecord(self.raw)
-
-    def __splitRecord(self, raw):
-        # parsing certificate only (just in this case --- many new cases can be added soon)
-        offset = 5 + int.from_bytes(raw[3:5], 'big')
-
-        self.certificate = self._parseCertificates(offset)
-        self.certificate.start_index = offset
-        self.certificate.end_index = offset + 1 + 2 + 2 + self.certificate.length
-
-    def dump(self):
-        raw = b''
-
-        raw += self.raw[:self.certificate.start_index]
-
-        raw += self.certificate.content_type.to_bytes(1, 'big')
-        raw += self.certificate.version
-        raw += self.certificate.length.to_bytes(2, 'big')
-
-        raw += self.certificate.payload["Handshake Type"].to_bytes(1, 'big')
-        raw += self.certificate.payload["Handshake Length"].to_bytes(3, 'big')
-        raw += self.certificate.payload["Certificates Length"].to_bytes(3, 'big')
-        for pair in self.certificate.payload["Certificates"]:
-            raw += pair[0].to_bytes(3, 'big') + pair[1]
-
-        raw += self.raw[self.certificate.end_index:]
-
-        return raw
-
-    def substituteCertificate(self, new_certificate_chain):
-        len_prev = 0
-        for pair in self.certificate.payload['Certificates']:
-            len_prev += 3
-            len_prev += len(pair[1])
-
-        len_cur = 0
-        for pair in new_certificate_chain:
-            len_cur += 3 + len(pair[1])
-
-        print(f"CURRENT LENGTH: {len_cur}")
-        len_adjust = len_cur - len_prev
-
-        self.certificate.payload['Handshake Length'] += len_adjust
-        self.certificate.payload['Certificates Length'] += len_adjust
-        self.certificate.length += len_adjust
-        self.certificate.payload['Certificates'] = new_certificate_chain
+        super().__init__(packet_bytes, offset=5 + int.from_bytes(packet_bytes[3:5], 'big'))
 
 
-class TLS_ClientCertificatePacket(TLS_Packet):
+class TLS_ClientCertificatePacket(TLS_CertificatePacket):
     def __init__(self, packet_bytes=None):
-        super().__init__(packet_bytes)
-        self.certificate = TLS_RecordLayer()
-        self.client_key_exchange = TLS_RecordLayer()  # empty (no need to use)
-        self.certificate_verify = TLS_RecordLayer()  # empty (no need to use)
-        self.change_cipher_spec = TLS_RecordLayer()  # empty (no need to use)
-        self.encrypted_handshake_message = TLS_RecordLayer()  # empty (no need to use)
-
-        if packet_bytes is not None:
-            self.__splitRecord(self.raw)
-
-    def __splitRecord(self, raw):
-        offset = 0
-        self.certificate = self._parseCertificates(offset)
-        self.certificate.start_index = offset
-        self.certificate.end_index = offset + 1 + 2 + 2 + self.certificate.length
-
-    def dump(self):
-        raw = b''
-        raw += self.raw[:self.certificate.start_index]
-
-        raw += self.certificate.content_type.to_bytes(1, 'big')
-        raw += self.certificate.version
-        raw += self.certificate.length.to_bytes(2, 'big')
-
-        raw += self.certificate.payload["Handshake Type"].to_bytes(1, 'big')
-        raw += self.certificate.payload["Handshake Length"].to_bytes(3, 'big')
-        raw += self.certificate.payload["Certificates Length"].to_bytes(3, 'big')
-        for pair in self.certificate.payload["Certificates"]:
-            raw += pair[0].to_bytes(3, 'big') + pair[1]
-
-        raw += self.raw[self.certificate.end_index:]
-
-        return raw
-
-    def substituteCertificate(self, new_certificate_chain):
-        len_prev = 0
-        for pair in self.certificate.payload['Certificates']:
-            len_prev += 3
-            len_prev += len(pair[1])
-
-        len_cur = 0
-        for pair in new_certificate_chain:
-            len_cur += 3 + len(pair[1])
-
-        len_adjust = len_cur - len_prev
-
-        self.certificate.payload['Handshake Length'] += len_adjust
-        self.certificate.payload['Certificates Length'] += len_adjust
-        self.certificate.length += len_adjust
-        self.certificate.payload['Certificates'] = new_certificate_chain
+        super().__init__(packet_bytes, offset=0)
 
 
 class TCP(Protocol):
@@ -270,10 +273,10 @@ class TCPServerBridgeProto(TCP):
     # must be intercepted and modified!
     @WeaselProxy.modify
     def dataReceived(self, data):
-        if TLS_Packet.containsCertificate(data):
+        if TLS_CertificatePacket.containsCertificate(data):
             logging.critical(f"Got client certificate")
             packet = TLS_ClientCertificatePacket(data)  # test for server hello
-            packet.substituteCertificate(self.factory.proxy.fakeCertificatesChain.getList())
+            packet.substituteCertificates(self.factory.proxy.fakeCertificatesChain.getList())
             data = packet.dump()
 
         if self.target_bridge is not None:
@@ -325,7 +328,7 @@ class TCPClientBridgeProto(TCP):
         self.factory.server.target_bridge = self
 
     def dataReceived(self, data):
-        if TLS_Packet.containsCertificate(data):
+        if TLS_CertificatePacket.containsCertificate(data):
             logging.critical(f"Got server certificate")
 
             packet = TLS_ServerHelloPacket(data)  # test for server hello
@@ -333,7 +336,7 @@ class TCPClientBridgeProto(TCP):
 
             # do something with cert here
             packet.certificate.payload['Certificates'][0][1] = cert.dump()
-        elif TLS_Packet.containsError(data):
+        elif TLS_CertificatePacket.containsError(data):
             logging.warning("Got error from server. Take a look!")
             logging.warning(f"Error text: {TLS_errors[data[6]]}")
 

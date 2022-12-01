@@ -3,16 +3,32 @@ import random
 
 
 class CertificateChain:
+    """
+    CertificateChain class is an abstraction containing certificates list
+    Many other certificates processing functions can be added
+    That abstraction makes code much easier to understand and read
+    """
+
     def __init__(self, *args):
         self.chain = list()
         for certificate_raw in args:
             self.chain.append([len(certificate_raw), certificate_raw])
 
     def getList(self):
+        """
+        Getting list of certificates chain. CA certificate must be the last one
+
+        :return: List object. List contains certificate chain - easy to get certificate by indexes
+        """
         return self.chain
 
 
 def getFields():
+    """
+    Getting user input for generating CA certificate, certificate request and client certificate
+
+    :return fields: Dictionary object. Contains user input data.
+    """
     fields = dict()
 
     fields["C"] = input("Country: ")
@@ -29,6 +45,22 @@ def getFields():
 
 
 def generateCA(country, state, locality, organization, organization_unit, common_name, email, not_before, not_after):
+    """
+    Generate CA certificate using user input parameters
+    In WeaselProxy CA certificate is used to sign client certificate
+
+    :param country: String object. Country field
+    :param state: String object. State field
+    :param locality: String object. Locality field
+    :param organization: String object. Organization field
+    :param organization_unit: String object. Organization Unit
+    :param common_name: String object. Common name
+    :param email: String object. Email address
+    :param not_before: Unix timestamp. Not before certificate date. May be used to test server on expired certificates
+    :param not_after: Unix timestamp. Not after certificate date. May be used to test server on expired certificates
+    :return ca_key: CA key
+    :return ca_cert: CA certificate
+    """
     serial_number = random.getrandbits(64)
     ca_key = crypto.PKey()
     ca_key.generate_key(crypto.TYPE_RSA, 2048)
@@ -52,6 +84,19 @@ def generateCA(country, state, locality, organization, organization_unit, common
 
 
 def generateRequest(country, state, locality, organization, organization_unit, common_name, email):
+    """
+    Generates certificate request using user input parameters
+    WeaselProxy using request to generate client certificate in a certificate chain
+
+    :param country: String object. Country field
+    :param state: String object. State field
+    :param locality: String object. Locality field
+    :param organization: String object. Organization field
+    :param organization_unit: String object. Organization Unit
+    :param common_name: String object. Common name
+    :param email: String object. Email address
+    :return: req: OpenSSL.crypto.X509 object. Certificate request
+    """
     req_key = crypto.PKey()
     req_key.generate_key(crypto.TYPE_RSA, 2048)
 
@@ -70,6 +115,17 @@ def generateRequest(country, state, locality, organization, organization_unit, c
 
 
 def generateCertificate(not_before, not_after, request, issuer, issuer_key):
+    """
+    Generates client certificate using user input parameters
+    WeaselProxy using request to generate client certificate in a certificate chain
+
+    :param not_before: Unix timestamp. Not before certificate date. May be used to test server on expired certificates
+    :param not_after: Unix timestamp. Not after certificate date. May be used to test server on expired certificates
+    :param request: OpenSSL.crypto.X509Req object. Generated certificate request
+    :param issuer: OpenSSL.crypto.X509 object. Certificate issuer. In WeaselProxy issuer is CA certificate
+    :param issuer_key: OpenSSL.crypto.PKey object. Issuer key. In WeaselProxy issuer key is CA private key (ca_key)
+    :return: OpenSSL.crypto.X509 object. Client Certificate
+    """
     serial_number = random.getrandbits(64)
     new_cert = crypto.X509()
     new_cert.set_serial_number(serial_number)
