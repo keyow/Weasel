@@ -2,7 +2,7 @@
 
 import os
 import argparse
-from sys import exit
+import sys
 from WeaselTCP import *
 from certgen import *
 

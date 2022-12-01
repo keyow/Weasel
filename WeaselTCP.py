@@ -71,7 +71,7 @@ class TLS_CertificatePacket:
 
         if packet_bytes is not None:
             # we can try to split record only when packet_bytes are not None (additional protection)
-            self.__splitRecord(offset=offset)
+            self.__splitCertificateRecord(offset=offset)
 
     @staticmethod
     def containsCertificate(raw):
