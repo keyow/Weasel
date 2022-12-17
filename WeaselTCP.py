@@ -7,6 +7,9 @@ import logging
 import subprocess
 from asn1crypto import x509
 from errors import TLS_errors
+import pexpect  # ???
+import datetime
+
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s : %(message)s",
@@ -234,9 +237,10 @@ class WeaselProxy(Proxy):
                                                    can contain good certificates - that's also possible
     """
 
-    def __init__(self, bind_port, interface):
+    def __init__(self, bind_port, interface, quiet):
         super().__init__(bind_port, interface)
         self.fakeCertificatesChain = None
+        self.quiet = quiet
         subprocess.call(['sudo', 'bash', './scripts/rules.sh'])
 
     def start(self, fakeCertificateChain):
@@ -282,7 +286,7 @@ class TCPServerBridgeProto(TCP):
             origin_dst = self.__destinationInfo()
             self.factory.server_ip = origin_dst[0]
             self.factory.server_port = origin_dst[1]
-        logging.info("Client connection successful!")
+        logging.info(f"[{datetime.datetime.now()}]: Client connection successful!")
         logging.debug(f"\n-----------------------------------\n"
                       f"Client:\n |\tIP address: {self.ip_tuple[0][0]}\n |\tPort: {self.ip_tuple[0][1]}\n"
                       f" |\n |\n v\n"
@@ -291,12 +295,24 @@ class TCPServerBridgeProto(TCP):
                       f"Server (original):\n \tIP address: {self.factory.server_ip}\n \tPort: {self.factory.server_port}\n"
                       f"-----------------------------------\n")
 
+        """
+        if not self.factory.proxy.quiet:
+            print("\n=========== Sending CA certificate to server ===========")
+            ca_name = input("Enter CA certificate name: ")
+            subprocess.call(['sudo', 'scp', 'misc/certinfo/FAKE_CA.pem',
+                             f'{self.factory.server_ip}:/home/first/{ca_name}.crt'])
+            subprocess.call(
+                ['ssh', f"{self.factory.server_ip}", "sudo", "-S", "mv", f"/home/first/{ca_name}.crt",
+                 "/usr/local/share/ca-certificates/"])
+            subprocess.call(['ssh', "192.168.10.131", "update-ca-certificates"])
+        """
+
         # Trying to connect to the target server
         self.connectToTargetServer()
 
     def dataReceived(self, data):
         if TLS_CertificatePacket.containsCertificate(data):
-            logging.critical(f"Got client certificate")
+            logging.critical(f"[{datetime.datetime.now()}]: Got client certificate")
             packet = TLS_ClientCertificatePacket(data)  # test for server hello
             packet.substituteCertificates(self.factory.proxy.fakeCertificatesChain.getList())
             data = packet.dump()
@@ -338,7 +354,7 @@ class TCPServerBridgeProto(TCP):
         """
         In this case we know about the server, so se can transfer our data straight to the server without using buffer.
 
-        :param data: Bytes object. Raw data
+        :param data: Bytes object. Raw dataS
         :return: nothing
         """
         self.target_bridge.write(data)
@@ -352,7 +368,7 @@ class TCPClientBridgeProto(TCP):
     """
 
     def connectionMade(self):
-        logging.info('Server connection successful!')
+        logging.info('[{datetime.datetime.now()}]: Server connection successful!')
 
         # if buffer is not empty means that connection hasn't been terminated and every packet was sent at once
         if self.factory.server.buffer != b'':
@@ -368,7 +384,7 @@ class TCPClientBridgeProto(TCP):
 
     def dataReceived(self, data):
         if TLS_CertificatePacket.containsCertificate(data):
-            logging.critical(f"Got server certificate")
+            logging.critical(f"[{datetime.datetime.now()}]: Got server certificate")
 
             # if server response contains certificate - it is exactly server hello packet
             packet = TLS_ServerHelloPacket(data)
@@ -376,7 +392,7 @@ class TCPClientBridgeProto(TCP):
 
             packet.certificate.payload['Certificates'][0][1] = cert.dump()
         elif TLS_CertificatePacket.containsError(data):
-            logging.warning("Got error from server. Take a look!")
+            logging.warning(f"[{datetime.datetime.now()}]: Got error from server. Take a look!")
             logging.warning(f"Error text: {TLS_errors[data[6]]}")
 
         # target server response (transfer from proxy to client)
