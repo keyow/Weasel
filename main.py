@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-
+import logging
 import os
 import argparse
 import sys
@@ -7,6 +7,7 @@ from WeaselTCP import *
 from certgen import *
 from OpenSSL import crypto
 from time import sleep
+import netifaces
 
 if __name__ == "__main__":
     if not os.geteuid() == 0:
@@ -18,6 +19,7 @@ if __name__ == "__main__":
         description="Weasel is made for processing MITM attacking with certificates exploration and substitution",
         epilog="Github: https://github.com/keyow/Weasel"
     )
+    parser.add_argument('-i', '--interface', action='store')
     parser.add_argument('-quiet', action='store_true')
     parser.add_argument('-instant', action='store_true')
     parser.add_argument('-debug', action='store_true')
@@ -30,9 +32,18 @@ if __name__ == "__main__":
     x509_p = subparsers.add_parser('x509')
     x509_p.add_argument('-CAfile')
     x509_p.add_argument('-cert')
+    # TODO add debug mode
     # parser.add_argument('-debug', action='store_true')
 
     options = parser.parse_args()
+
+    interfaces = netifaces.interfaces()
+    if options.interface not in interfaces:
+        logging.error("No such interface")
+        logging.info("Existing interfaces:")
+        for interface, i in zip(interfaces, range(len(interfaces))):
+            print(f"{i})\t{interface}")
+        exit(-1)
 
     CA_CERT, CLIENT_CERT = None, None
     if options.mode == 'generate':
@@ -41,14 +52,11 @@ if __name__ == "__main__":
 
         print("\n=========== Generating CLIENT certificate ===========")
         CLIENT_fields = getFields()
-
         CA_KEY, CA_CERT = generateCA(CA_fields["C"], CA_fields["S"], CA_fields["L"], CA_fields["O"], CA_fields["OU"],
                                      CA_fields["CN"], CA_fields["emailAddress"], CA_fields["notBefore"],
                                      CA_fields["notAfter"])
-
         REQ = generateRequest(CLIENT_fields["C"], CLIENT_fields["S"], CLIENT_fields["L"], CLIENT_fields["O"],
                               CLIENT_fields["OU"], CLIENT_fields["CN"], CLIENT_fields["emailAddress"])
-
         CLIENT_CERT = generateCertificate(CLIENT_fields["notBefore"], CLIENT_fields["notAfter"], request=REQ,
                                           issuer=CA_CERT, issuer_key=CA_KEY)
         if options.sgc:
@@ -73,7 +81,6 @@ if __name__ == "__main__":
     ca_cer_raw = crypto.dump_certificate(crypto.FILETYPE_ASN1, CA_CERT)
     client_cer_raw = crypto.dump_certificate(crypto.FILETYPE_ASN1, CLIENT_CERT)
 
-    # saving ca cert, sending to server and making it trusted
     ca_cer_pem = crypto.dump_certificate(crypto.FILETYPE_PEM, CA_CERT)
     with open("misc/certinfo/FAKE_CA.pem", 'wb') as f:
         f.write(ca_cer_pem)
@@ -85,13 +92,9 @@ if __name__ == "__main__":
                 sleep(0.03)
     print('\n' + '\t' * 2 + "Github: https://github.com/keyow/Weasel\n")
     sleep(0.1)
-    """
-    server_pass = None
-    if not options.quiet:
-        serve_pass = str(input("Enter server password"))
-    """
 
-    weaselProxy = WeaselProxy(bind_port=8080, interface="192.168.10.128", quiet=options.quiet)
+    address = netifaces.ifaddresses(options.interface)[netifaces.AF_INET][0]['addr']
+    weaselProxy = WeaselProxy(bind_port=8080, interface=address, quiet=options.quiet)
     try:
         weaselProxy.start(CertificateChain(client_cer_raw, ca_cer_raw))
     finally:

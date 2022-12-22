@@ -368,7 +368,7 @@ class TCPClientBridgeProto(TCP):
     """
 
     def connectionMade(self):
-        logging.info('[{datetime.datetime.now()}]: Server connection successful!')
+        logging.info(f'[{datetime.datetime.now()}]: Server connection successful!')
 
         # if buffer is not empty means that connection hasn't been terminated and every packet was sent at once
         if self.factory.server.buffer != b'':

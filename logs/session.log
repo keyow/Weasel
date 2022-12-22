@@ -1,3 +1,29 @@
-2022-12-17 04:32:48,979 INFO : tcp_proxy: ON
-2022-12-17 04:32:48,979 DEBUG : interface: 192.168.10.128
-2022-12-17 04:32:48,979 DEBUG : bind_port: 8080
+2022-12-22 05:01:03,483 INFO : tcp_proxy: ON
+2022-12-22 05:01:03,484 DEBUG : interface: 192.168.10.128
+2022-12-22 05:01:03,484 DEBUG : bind_port: 8080
+2022-12-22 05:01:06,785 INFO : [2022-12-22 05:01:06.785104]: Client connection successful!
+2022-12-22 05:01:06,785 DEBUG : 
+-----------------------------------
+Client:
+ |	IP address: 192.168.10.129
+ |	Port: 57742
+ |
+ |
+ v
+Proxy (current):
+ |	IP address: 192.168.10.128
+ |	Port: 8080
+ |
+ |
+ v
+Server (original):
+ 	IP address: 192.168.10.131
+ 	Port: 44330
+-----------------------------------
+
+2022-12-22 05:01:06,789 INFO : [2022-12-22 05:01:06.789706]: Server connection successful!
+2022-12-22 05:01:06,791 CRITICAL : [2022-12-22 05:01:06.791802]: Got server certificate
+2022-12-22 05:01:06,799 CRITICAL : [2022-12-22 05:01:06.799801]: Got client certificate
+2022-12-22 05:01:06,802 WARNING : [2022-12-22 05:01:06.802509]: Got error from server. Take a look!
+2022-12-22 05:01:06,802 WARNING : Error text: Certificate expired
+2022-12-22 05:01:06,803 ERROR : [TCPClientBridgeProto] Lose connection...
